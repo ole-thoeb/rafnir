@@ -1,7 +1,8 @@
-use crate::{Key, PolyMap};
+use crate::{PolyMap};
+use crate::key::NormalKey;
 
-const INT_KEY: Key<i32> = Key::new("i32");
-const STRING_KEY: Key<String> = Key::new("String");
+const INT_KEY: &NormalKey<i32> = &NormalKey::new(6666666661);
+const STRING_KEY: &NormalKey<String> = &NormalKey::new(6666666662);
 
 #[test]
 fn basic_insert_and_retrieve() {
@@ -10,6 +11,6 @@ fn basic_insert_and_retrieve() {
     let hello_world = String::from("Hello, World!");
     map.insert(STRING_KEY, hello_world.clone());
 
-    assert_eq!(map.get(&INT_KEY).unwrap(), &1);
-    assert_eq!(map.get(&STRING_KEY).unwrap(), &hello_world);
+    assert_eq!(map.get(INT_KEY).unwrap(), &1);
+    assert_eq!(map.get(STRING_KEY).unwrap(), &hello_world);
 }
