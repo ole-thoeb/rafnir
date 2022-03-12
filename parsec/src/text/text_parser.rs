@@ -100,6 +100,11 @@ impl<F, E> Chop<F, E> where F: Fn(char) -> bool + Clone {
     }
 }
 
+pub fn whitespace<E>() -> Chop<fn(char) -> bool, E> {
+    Chop::while_con(char::is_whitespace)
+}
+
+
 impl<F, E> Parser for Chop<F, E> where F: Fn(char) -> bool + Clone {
     type Value = String;
     type State = TextState;

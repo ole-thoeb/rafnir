@@ -31,19 +31,19 @@ pub trait Parser {
         Map2::new(self, parser, f)
     }
 
-    fn keep<T, P, F>(self, arg_parser: P) -> Map2<Self, P, Box<dyn Fn(Self::Value, P::Value) -> T> >
+    fn keep<T, P, F>(self, arg_parser: P) -> Map2<Self, P, fn(Self::Value, <P as Parser>::Value) -> T>
         where P: Parser<State=Self::State, Error=Self::Error>,
             F: Fn(P::Value) -> T,
             Self: Parser<Value=F> + Sized
     {
-        self.map2(arg_parser, Box::new(|func, arg| func(arg)))
+        self.map2(arg_parser, |func: Self::Value, arg: P::Value| func(arg))
     }
 
-    fn ignore<P>(self, ignore_parser: P) -> Map2<Self, P, Box<dyn Fn(Self::Value, P::Value) -> Self::Value> >
+    fn ignore<P>(self, ignore_parser: P) -> Map2<Self, P, fn(Self::Value, <P as Parser>::Value) ->Self::Value>
         where P: Parser<State=Self::State, Error=Self::Error>,
               Self: Sized
     {
-        self.map2(ignore_parser, Box::new(|value, _| value))
+        self.map2(ignore_parser, |value: Self::Value, _: P::Value| value)
     }
 
     fn flatten<P: Parser>(self) -> Flatten<Self>

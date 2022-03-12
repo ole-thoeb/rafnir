@@ -5,7 +5,7 @@ mod text_parser;
 #[cfg(test)]
 mod test {
     use crate::parser::{Parser, Succeed};
-    use crate::text::text_parser::{Chop, Number, TextParser, Token};
+    use crate::text::text_parser::{Number, whitespace, TextParser, Token};
 
     #[test]
     fn simple_addition() {
@@ -28,16 +28,15 @@ mod test {
             |int_res| int_res.map_err(|_| ParsError::ExpectedInteger),
             ParsError::ExpectedInteger,
         );
-        let white_space = Chop::while_con(char::is_whitespace);
         let plus = Token::new(
             String::from("+"),
             ParsError::ExpectedToken(String::from("+")),
         );
         let add_parser = Succeed::with(|lhs: i64| move |rhs: i64| Add { lhs, rhs })
             .keep(number.clone())
-            .ignore(white_space.clone())
+            .ignore(whitespace())
             .ignore(plus)
-            .ignore(white_space.clone())
+            .ignore(whitespace())
             .keep(number.clone());
         let add = add_parser.pars(input).expect("Correct input");
         assert_eq!(Add { lhs: 2, rhs: 4 }, add);
