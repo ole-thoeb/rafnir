@@ -5,7 +5,7 @@ use std::rc::Rc;
 use std::str::FromStr;
 
 use crate::parser::Parser;
-use crate::text::location::Location;
+use crate::text::location::{Located, Location};
 
 #[derive(Clone, Debug)]
 pub struct TextState {
@@ -42,20 +42,31 @@ impl TextState {
         };
         self.location = new_location;
     }
+
+    pub fn locate_at_exactly<T>(&self, target: T) -> Located<T> {
+        self.locate(self.location.clone(), target)
+    }
+
+    pub fn locate<T>(&self, start_location: Location, target: T) -> Located<T> {
+        start_location.locate(self.location.clone(), target)
+    }
+
+    pub fn location(&self) -> &Location {
+        &self.location
+    }
 }
 
-pub trait TextParser: Parser<State=TextState> {
-
-    fn pars(&self, input: String) -> Result<Self::Value, Self::Error> {
+pub trait TextParser<E>: Parser<State=TextState, Error=Located<E>> {
+    fn pars(&self, input: impl Into<String>) -> Result<Self::Value, Self::Error> {
         let state = TextState {
-            input: Rc::new(input),
-            location : Location::default()
+            input: Rc::new(input.into()),
+            location: Location::default(),
         };
         self.do_pars(state).map(|(_, value)| value)
     }
 }
 
-impl<'a, P: Parser<State=TextState>> TextParser for P {}
+impl<P: Parser<State=TextState, Error=Located<E>>, E> TextParser<E> for P {}
 
 pub struct Token<E: Clone> {
     token: String,
@@ -71,15 +82,16 @@ impl<E: Clone> Token<E> {
 impl<E: Clone> Parser for Token<E> {
     type Value = String;
     type State = TextState;
-    type Error = E;
+    type Error = Located<E>;
 
     fn do_pars(&self, mut state: Self::State) -> Result<(Self::State, Self::Value), Self::Error> {
+        let start_location = state.location().clone();
         for expected_char in self.token.chars() {
             match state.next() {
-                None => return Err(self.error.clone()),
+                None => return Err(state.locate(start_location, self.error.clone())),
                 Some(found_char) => {
                     if expected_char != found_char {
-                        return Err(self.error.clone());
+                        return Err(state.locate(start_location, self.error.clone()));
                     }
                 }
             }
@@ -91,7 +103,7 @@ impl<E: Clone> Parser for Token<E> {
 #[derive(Debug, Clone)]
 pub struct Chop<F: Clone, E> {
     f: F,
-    _error: PhantomData<E>
+    _error: PhantomData<E>,
 }
 
 impl<F, E> Chop<F, E> where F: Fn(char) -> bool + Clone {
@@ -149,18 +161,21 @@ impl<F, I, R, E: Clone> Parser for Number<F, I, R, E>
 {
     type Value = R;
     type State = TextState;
-    type Error = E;
+    type Error = Located<E>;
 
     fn do_pars(&self, mut state: Self::State) -> Result<(Self::State, Self::Value), Self::Error> {
         let mut safe_state = state.clone();
+        let start_location = state.location().clone();
 
         let mut consumed_chars = vec![];
         let mut dot_found = false;
         let mut is_float = false;
+        let mut f_found = false;
         loop {
             match state.next() {
                 Some('F') => {
                     is_float = true;
+                    f_found = true;
                     break;
                 }
                 Some('.') if !dot_found => {
@@ -183,29 +198,39 @@ impl<F, I, R, E: Clone> Parser for Number<F, I, R, E>
         for _ in 0..consumed_chars.len() {
             safe_state.advance()
         }
+        if f_found {
+            safe_state.advance()
+        }
 
         let made_progress = !consumed_chars.is_empty();
         let number_str = String::from_iter(consumed_chars);
         if !made_progress {
-            return Err(self.error.clone());
+            return Err(safe_state.locate(start_location, self.error.clone()));
         }
 
         if is_float {
             let number = f64::from_str(number_str.as_str());
-            (&self.float)(number).map(|r| (safe_state, r))
+            match (&self.float)(number) {
+                Ok(r) => Ok((safe_state, r)),
+                Err(e) => Err(safe_state.locate(start_location, e))
+            }
         } else {
             let number = i64::from_str(number_str.as_str());
-            (&self.integer)(number).map(|r| (safe_state, r))
+            match (&self.integer)(number) {
+                Ok(r) => Ok((safe_state, r)),
+                Err(e) => Err(safe_state.locate(start_location, e))
+            }
         }
     }
 }
 
 #[cfg(test)]
 mod test {
+    use crate::text::location::{Located, Location};
     use crate::text::text_parser::{Number, TextParser};
 
-    fn str_err<T>(str: &str) -> Result<T, String> {
-        Err(String::from(str))
+    fn str_err<T>(str: &str, start_location: Location, end_location: Location) -> Result<T, Located<String>> {
+        Err(start_location.locate(end_location, String::from(str)))
     }
 
     #[test]
@@ -218,22 +243,28 @@ mod test {
         assert_eq!(4i64, integer.pars(String::from("4")).expect("Correct input"));
         assert_eq!(42424242i64, integer.pars(String::from("42424242")).expect("Correct input"));
 
-        assert_eq!(str_err("Expected integer"), integer.pars(String::from("Abc")));
-        assert_eq!(str_err("Found float, expected integer"), integer.pars(String::from("42F")));
-        assert_eq!(str_err("Found float, expected integer"), integer.pars(String::from("42.42")));
+        assert_eq!(str_err("Expected integer", Location::start(), Location::start()),
+                   integer.pars(String::from("Abc")));
+        assert_eq!(str_err("Found float, expected integer", Location::start(), Location::new(3, 4, 1)),
+                   integer.pars(String::from("42F")));
+        assert_eq!(str_err("Found float, expected integer", Location::start(), Location::new(5, 6, 1)),
+                   integer.pars(String::from("42.42")));
     }
 
     #[test]
     fn pars_float() {
         let float = Number::new(
             |int_res| int_res.map_err(|e| format!("{}", e)),
-            |_|Err(String::from("Found integer, expected float")),
+            |_| Err(String::from("Found integer, expected float")),
             String::from("Expected float"),
         );
-        assert_eq!(str_err("Found integer, expected float"), float.pars(String::from("4")));
-        assert_eq!(str_err("Found integer, expected float"), float.pars(String::from("42424242")));
+        assert_eq!(str_err("Found integer, expected float", Location::start(), Location::new(1, 2, 1)),
+                   float.pars(String::from("4")));
+        assert_eq!(str_err("Found integer, expected float", Location::start(), Location::new(8, 9, 1)),
+                   float.pars(String::from("42424242")));
+        assert_eq!(str_err("Expected float", Location::start(), Location::start()),
+                   float.pars(String::from("Abc")));
 
-        assert_eq!(str_err("Expected float"), float.pars(String::from("Abc")));
         assert_eq!(Ok(42f64), float.pars(String::from("42F")));
         assert_eq!(Ok(42.42f64), float.pars(String::from("42.42")));
     }
