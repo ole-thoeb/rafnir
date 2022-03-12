@@ -199,6 +199,10 @@ impl<F, I, R, E: Clone> Parser for Number<F, I, R, E>
 mod test {
     use crate::text::text_parser::{Number, TextParser};
 
+    fn str_err<T>(str: &str) -> Result<T, String> {
+        Err(String::from(str))
+    }
+
     #[test]
     fn pars_integer() {
         let integer = Number::new(
@@ -206,6 +210,26 @@ mod test {
             |int_res| int_res.map_err(|e| format!("{}", e)),
             String::from("Expected integer"),
         );
-        assert_eq!(4i64, integer.pars(String::from("4")).expect("correct input"))
+        assert_eq!(4i64, integer.pars(String::from("4")).expect("Correct input"));
+        assert_eq!(42424242i64, integer.pars(String::from("42424242")).expect("Correct input"));
+
+        assert_eq!(str_err("Expected integer"), integer.pars(String::from("Abc")));
+        assert_eq!(str_err("Found float, expected integer"), integer.pars(String::from("42F")));
+        assert_eq!(str_err("Found float, expected integer"), integer.pars(String::from("42.42")));
+    }
+
+    #[test]
+    fn pars_float() {
+        let float = Number::new(
+            |int_res| int_res.map_err(|e| format!("{}", e)),
+            |_|Err(String::from("Found integer, expected float")),
+            String::from("Expected float"),
+        );
+        assert_eq!(str_err("Found integer, expected float"), float.pars(String::from("4")));
+        assert_eq!(str_err("Found integer, expected float"), float.pars(String::from("42424242")));
+
+        assert_eq!(str_err("Expected float"), float.pars(String::from("Abc")));
+        assert_eq!(Ok(42f64), float.pars(String::from("42F")));
+        assert_eq!(Ok(42.42f64), float.pars(String::from("42.42")));
     }
 }
